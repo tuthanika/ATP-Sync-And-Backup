@@ -227,4 +227,4 @@ git add .
 if ! git diff --cached --quiet; then
   git commit -m "Restore file backup và thay thế nội dung theo quy tắc"
 fi
-git push origin "$SELECTED_BRANCH"
+git push --force origin "$SELECTED_BRANCH"
