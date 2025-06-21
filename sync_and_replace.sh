@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-# ----- Load section-style env (nếu dùng section, giữ nguyên đoạn này nếu bạn đã có) -----
+# ========== LOAD ENV (section-style) ==========
 load_env_section() {
   local envfile="$1"
   local section=""
@@ -23,17 +23,16 @@ load_env_section() {
 }
 if [[ -n "${INPUT_ENV_FILE:-}" && -f "${INPUT_ENV_FILE}" ]]; then
   load_env_section "${INPUT_ENV_FILE}"
-  # Gán các biến env
   for key in GIT_USER_NAME GIT_USER_EMAIL UPSTREAM_URL SOURCE_BRANCH_MANUAL BACKUP_BRANCH BACKUP_AUTHOR BACKUP_PATHS REPLACE_RULES_1 REPLACE_RULES_2; do
     eval "export $key=\"\${VAL_$key:-}\""
   done
 fi
 
-# ----- Thiết lập user Git (bắt buộc) -----
+# ========== SETUP GIT USER ==========
 git config user.name "${GIT_USER_NAME:-tuthanika-bot}"
 git config user.email "${GIT_USER_EMAIL:-tuthanika@gmail.com}"
 
-# ----- Xác định branch chính sử dụng cho backup -----
+# ========== BACKUP BRANCH ==========
 SELECTED_BRANCH="${SOURCE_BRANCH_MANUAL:-}"
 if [ -z "$SELECTED_BRANCH" ]; then
   for b in main master; do
@@ -48,7 +47,6 @@ if [ -z "$SELECTED_BRANCH" ]; then
   exit 1
 fi
 
-# ----- Chuẩn bị branch backup trong worktree riêng -----
 git fetch origin "${BACKUP_BRANCH}" || true
 rm -rf /tmp/backup-repo || true
 if git ls-remote --exit-code --heads origin ${BACKUP_BRANCH}; then
@@ -66,18 +64,13 @@ else
   cd -
 fi
 
-# ----- Lấy danh sách commit đã backup -----
 cd /tmp/backup-repo
 git log --pretty=format:"%H" > /tmp/backup_branch_commits.txt
 cd "$GITHUB_WORKSPACE"
 
-# ----- Checkout lại branch chính để chuẩn bị backup commit mới -----
 git checkout "$SELECTED_BRANCH"
-
-# ----- Lấy danh sách commit mới của user trên branch chính (chưa có trong branch backup) -----
 git log --author="${BACKUP_AUTHOR}" --pretty=format:"%H" | grep -Fxv -f /tmp/backup_branch_commits.txt > /tmp/to_backup.txt || true
 
-# ----- Backup từng commit mới vào branch backup (logic đúng như yêu cầu) -----
 if [ ! -s /tmp/to_backup.txt ]; then
   echo "Không có commit mới để backup"
 else
@@ -174,4 +167,81 @@ else
   cd "$GITHUB_WORKSPACE"
 fi
 
-# ---- (Phần sync, replace, restore... phía sau giữ nguyên như cũ, tuỳ theo action của bạn) ----
+# ========== BACKUP/RESTORE FILES ==========
+echo "${BACKUP_PATHS}" | tr -d '\r' | sed '/^\s*$/d' > /tmp/backup_paths.txt
+
+mkdir -p /tmp/backup
+while IFS= read -r path || [[ -n "$path" ]]; do
+  for src in $path; do
+    if [ -e "$src" ]; then
+      dest="/tmp/backup/$src"
+      mkdir -p "$(dirname "$dest")"
+      cp -a "$src" "$dest"
+    fi
+  done
+done < /tmp/backup_paths.txt
+
+# ========== SYNC UPSTREAM ==========
+SELECTED_BRANCH="${SOURCE_BRANCH_MANUAL:-}"
+if [ -z "$SELECTED_BRANCH" ]; then
+  for b in main master; do
+    if git ls-remote --exit-code --heads origin $b; then
+      SELECTED_BRANCH="$b"
+      break
+    fi
+  done
+fi
+if [ -z "$SELECTED_BRANCH" ]; then
+  echo "Không tìm thấy branch main hoặc master!"
+  exit 1
+fi
+
+git remote add upstream "$UPSTREAM_URL" || true
+git fetch upstream
+git reset --hard upstream/$SELECTED_BRANCH
+
+# ========== REPLACE RULES 1 ==========
+echo "${REPLACE_RULES_1}" | while IFS='|' read -r filepath from to; do
+  [ -z "$filepath" ] && continue
+  [ ! -f "$filepath" ] && continue
+  if [ -z "$to" ]; then
+    sed -i "/^$from$/d" "$filepath"
+  else
+    sed -i "s|^$from\$|$to|g" "$filepath"
+  fi
+done
+
+# ========== REPLACE RULES 2 ==========
+echo "${REPLACE_RULES_2}" | while IFS='|' read -r filepath from to; do
+  [ -z "$filepath" ] && continue
+  [ ! -f "$filepath" ] && continue
+  if [ -z "$to" ]; then
+    sed -i "s|$from||gI" "$filepath"
+  else
+    sed -i "s|$from|$to|gI" "$filepath"
+  fi
+done
+
+# ========== RESTORE FILES ==========
+cd /tmp/backup
+find . -type f -o -type d | tail -n +2 | while read path; do
+  target="${path#./}"
+  if [ -f "$path" ]; then
+    mkdir -p "$(dirname "$GITHUB_WORKSPACE/$target")"
+    cp -a "$path" "$GITHUB_WORKSPACE/$target"
+  fi
+  if [ -d "$path" ] && [ -z "$(ls -A "$path")" ]; then
+    mkdir -p "$GITHUB_WORKSPACE/$target"
+  fi
+done
+cd "$GITHUB_WORKSPACE"
+
+# ========== FINAL SQUASH: LỊCH SỬ VỀ 1 COMMIT DUY NHẤT ==========
+git add .
+git diff --cached --exit-code || git commit -m "Sync upstream và thay thế keyword chính xác/khớp từ"
+
+git checkout --orphan temp-sync
+git add .
+git commit -m "Final sync: all backup/replace content"
+git branch -M temp-sync "$SELECTED_BRANCH"
+git push --force origin "$SELECTED_BRANCH"
