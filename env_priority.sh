@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Load env from secrets (if exist) or from section-formatted repo.env (multi-line safe)
 set -e
 
 ENV_FILE="${1:-repo.env}"
@@ -29,8 +28,10 @@ for k in "${!SECTION_VARS[@]}"; do
   v="$(echo "$v" | sed '/^[[:space:]]*$/d')"
   if [[ -z "${!k}" ]]; then
     export "$k"="$v"
-    echo "$k<<EOF" >> $GITHUB_ENV
-    echo "$v" >> $GITHUB_ENV
-    echo "EOF" >> $GITHUB_ENV
+    if [[ -n "$GITHUB_ENV" ]]; then
+      echo "$k<<EOF" >> $GITHUB_ENV
+      echo "$v" >> $GITHUB_ENV
+      echo "EOF" >> $GITHUB_ENV
+    fi
   fi
 done
