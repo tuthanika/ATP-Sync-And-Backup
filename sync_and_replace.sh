@@ -23,7 +23,7 @@ load_env_section() {
 }
 if [[ -n "${INPUT_ENV_FILE:-}" && -f "${INPUT_ENV_FILE}" ]]; then
   load_env_section "${INPUT_ENV_FILE}"
-  for key in GIT_USER_NAME GIT_USER_EMAIL UPSTREAM_URL SOURCE_BRANCH_MANUAL BACKUP_BRANCH BACKUP_AUTHOR BACKUP_PATHS REPLACE_RULES_1 REPLACE_RULES_2; do
+  for key in GIT_USER_NAME GIT_USER_EMAIL UPSTREAM_URL SOURCE_BRANCH_MANUAL TARGET_BRANCH_MANUAL BACKUP_BRANCH BACKUP_AUTHOR BACKUP_PATHS REPLACE_RULES_1 REPLACE_RULES_2; do
     eval "export $key=\"\${VAL_$key:-}\""
   done
 fi
@@ -32,21 +32,42 @@ fi
 git config user.name "${GIT_USER_NAME:-tuthanika-bot}"
 git config user.email "${GIT_USER_EMAIL:-tuthanika@gmail.com}"
 
-# ========== BACKUP BRANCH ==========
-SELECTED_BRANCH="${SOURCE_BRANCH_MANUAL:-}"
-if [ -z "$SELECTED_BRANCH" ]; then
+# ========== DETECT UPSTREAM & TARGET BRANCH ==========
+git remote add upstream "${UPSTREAM_URL}" || true
+git fetch upstream
+
+# Nhận branch nguồn (upstream)
+if [ -n "${SOURCE_BRANCH_MANUAL:-}" ]; then
+  UPSTREAM_BRANCH="$SOURCE_BRANCH_MANUAL"
+else
   for b in main master; do
-    if git ls-remote --exit-code --heads origin $b; then
-      SELECTED_BRANCH="$b"
+    if git ls-remote --exit-code --heads upstream $b; then
+      UPSTREAM_BRANCH="$b"
       break
     fi
   done
-fi
-if [ -z "$SELECTED_BRANCH" ]; then
-  echo "Không tìm thấy branch main hoặc master!"
-  exit 1
+  if [ -z "${UPSTREAM_BRANCH:-}" ]; then
+    # fallback: lấy branch mặc định nếu không có main/master
+    UPSTREAM_BRANCH="$(git remote show upstream | awk '/HEAD branch/ {print $NF}')"
+    if [ -z "$UPSTREAM_BRANCH" ]; then
+      echo "Không tìm thấy branch nguồn phù hợp!"
+      exit 1
+    fi
+  fi
 fi
 
+# Nhận branch target (repo hiện tại)
+if [ -n "${TARGET_BRANCH_MANUAL:-}" ]; then
+  TARGET_BRANCH="$TARGET_BRANCH_MANUAL"
+else
+  TARGET_BRANCH="$(git remote show origin | awk '/HEAD branch/ {print $NF}')"
+  if [ -z "$TARGET_BRANCH" ]; then
+    echo "Không thể xác định branch mặc định của repo hiện tại!"
+    exit 1
+  fi
+fi
+
+# ========== BACKUP BRANCH ==========
 git fetch origin "${BACKUP_BRANCH}" || true
 rm -rf /tmp/backup-repo || true
 if git ls-remote --exit-code --heads origin ${BACKUP_BRANCH}; then
@@ -68,7 +89,7 @@ cd /tmp/backup-repo
 git log --pretty=format:"%H" > /tmp/backup_branch_commits.txt
 cd "$GITHUB_WORKSPACE"
 
-git checkout "$SELECTED_BRANCH"
+git checkout "$TARGET_BRANCH"
 git log --author="${BACKUP_AUTHOR}" --pretty=format:"%H" | grep -Fxv -f /tmp/backup_branch_commits.txt > /tmp/to_backup.txt || true
 
 if [ ! -s /tmp/to_backup.txt ]; then
@@ -182,9 +203,8 @@ while IFS= read -r path || [[ -n "$path" ]]; do
 done < /tmp/backup_paths.txt
 
 # ========== SYNC UPSTREAM (giữ nguyên lịch sử repo nguồn) ==========
-git remote add upstream "$UPSTREAM_URL" || true
-git fetch upstream
-git reset --hard upstream/"$SELECTED_BRANCH"
+git checkout "$TARGET_BRANCH"
+git reset --hard upstream/"$UPSTREAM_BRANCH"
 
 # ========== REPLACE RULES 1 ==========
 echo "${REPLACE_RULES_1}" | while IFS='|' read -r filepath from to; do
@@ -227,4 +247,4 @@ git add .
 if ! git diff --cached --quiet; then
   git commit -m "Restore file backup và thay thế nội dung theo quy tắc"
 fi
-git push --force origin "$SELECTED_BRANCH"
+git push --force origin "$TARGET_BRANCH"
