@@ -1,25 +1,18 @@
-name: "Sync and Backup Workflow"
-description: "Sync code từ upstream, backup commit, replace keyword, ưu tiên secrets > section-style repo.env"
+name: "ATP Sync and Backup"
+description: "Sync files and backup from an upstream repo, with env and replace rules."
 inputs:
   env-file:
-    description: "Path đến file env, mặc định là repo.env"
+    description: "Path to the repo.env config file"
     required: false
-    default: "repo.env"
+    default: repo.env
 runs:
   using: "composite"
   steps:
-    - name: Make scripts executable
+    - name: Load env with priority (secrets/env > repo.env)
       shell: bash
       run: |
-        chmod +x "${{ github.action_path }}/env_priority.sh"
-        chmod +x "${{ github.action_path }}/sync_and_replace.sh"
-
-    - name: Load env variables from secrets or repo.env
+        bash "${{ github.action_path }}/env_priority_loader.sh" "${{ inputs.env-file }}"
+    - name: Main backup/sync logic
       shell: bash
       run: |
-        "${{ github.action_path }}/env_priority.sh" "${{ inputs.env-file }}"
-
-    - name: Run sync and replace logic
-      shell: bash
-      run: |
-        "${{ github.action_path }}/sync_and_replace.sh"
+        bash "${{ github.action_path }}/backup_sync.sh"
