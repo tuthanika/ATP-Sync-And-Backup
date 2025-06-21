@@ -11,8 +11,8 @@ runs:
     - name: Load env with priority (secrets/env > repo.env)
       shell: bash
       run: |
-        bash "${{ github.action_path }}/env_priority_loader.sh" "${{ inputs.env-file }}"
+        bash "${{ github.action_path }}/env_priority.sh" "${{ inputs.env-file }}"
     - name: Main backup/sync logic
       shell: bash
       run: |
-        bash "${{ github.action_path }}/backup_sync.sh"
+        bash "${{ github.action_path }}/sync_and_replace.sh"
