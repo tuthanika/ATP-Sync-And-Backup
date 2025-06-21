@@ -181,24 +181,10 @@ while IFS= read -r path || [[ -n "$path" ]]; do
   done
 done < /tmp/backup_paths.txt
 
-# ========== SYNC UPSTREAM ==========
-SELECTED_BRANCH="${SOURCE_BRANCH_MANUAL:-}"
-if [ -z "$SELECTED_BRANCH" ]; then
-  for b in main master; do
-    if git ls-remote --exit-code --heads origin $b; then
-      SELECTED_BRANCH="$b"
-      break
-    fi
-  done
-fi
-if [ -z "$SELECTED_BRANCH" ]; then
-  echo "Không tìm thấy branch main hoặc master!"
-  exit 1
-fi
-
+# ========== SYNC UPSTREAM (giữ nguyên lịch sử repo nguồn) ==========
 git remote add upstream "$UPSTREAM_URL" || true
 git fetch upstream
-git reset --hard upstream/$SELECTED_BRANCH
+git reset --hard upstream/"$SELECTED_BRANCH"
 
 # ========== REPLACE RULES 1 ==========
 echo "${REPLACE_RULES_1}" | while IFS='|' read -r filepath from to; do
@@ -236,12 +222,9 @@ find . -type f -o -type d | tail -n +2 | while read path; do
 done
 cd "$GITHUB_WORKSPACE"
 
-# ========== FINAL SQUASH: LỊCH SỬ VỀ 1 COMMIT DUY NHẤT ==========
+# ========== COMMIT RESTORE/REPLACE ==========
 git add .
-git diff --cached --exit-code || git commit -m "Sync upstream và thay thế keyword chính xác/khớp từ"
-
-git checkout --orphan temp-sync
-git add .
-git commit -m "Final sync: all backup/replace content"
-git branch -M temp-sync "$SELECTED_BRANCH"
-git push --force origin "$SELECTED_BRANCH"
+if ! git diff --cached --quiet; then
+  git commit -m "Restore file backup và thay thế nội dung theo quy tắc"
+fi
+git push origin "$SELECTED_BRANCH"
