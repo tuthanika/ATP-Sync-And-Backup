@@ -12,14 +12,6 @@ runs:
       shell: bash
       run: |
         bash "${{ github.action_path }}/env_priority.sh" "${{ inputs.env-file }}"
-
-    - name: Debug env after loading
-      shell: bash
-      run: |
-        echo "BACKUP_BRANCH='$BACKUP_BRANCH'"
-        echo "UPSTREAM_URL='$UPSTREAM_URL'"
-        env | grep -E 'BACKUP_BRANCH|UPSTREAM_URL'
-        
     - name: Main backup/sync logic
       shell: bash
       run: |
